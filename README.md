@@ -1,138 +1,190 @@
 # DQN Applied to Optimal Trade Execution
 
-This repository investigates **optimal trade execution** using **Reinforcement Learning (Deep Q-Network)** within an **Almgren–Chriss-style market impact environment**, and compares the learned policy to standard execution benchmarks (TWAP, VWAP proxy, and Almgren–Chriss).
-
-> ⚠️ The project structure will evolve. The current implementation is intentionally compact to provide a clear and reproducible baseline before modular refactoring.
-
----
-
-## Overview
-
-The objective is to liquidate (or acquire) a large position over a fixed horizon while balancing three competing effects:
-
-* **Temporary Market Impact** — aggressive trading deteriorates execution prices.
-* **Permanent Market Impact** — trading pressure shifts the underlying mid-price.
-* **Price Uncertainty** — stochastic volatility introduces timing risk.
-
-This setting follows the classical **Almgren–Chriss optimal execution framework**, extended here with **data-driven calibration** and a **reinforcement learning agent** trained to learn execution policies directly from the simulated environment.
+This repository studies **optimal trade execution** using a **Deep Q-Network (DQN)** trained inside a simplified **Almgren–Chriss market impact model**, and benchmarks the learned strategy against classical execution schedules such as **TWAP**, **VWAP (proxy)**, and the **Almgren–Chriss analytical solution**.
 
 ---
 
 ## Data
 
-Historical daily data for Microsoft (MSFT) from 2019–2024 is downloaded using `yfinance` to calibrate the environment.
+Historical daily data for Microsoft (MSFT) from 2019–2024 is downloaded using `yfinance` and used to calibrate the execution environment.
 
 ![MSFT Price](figures/msft_price.png)
 
-The dataset is used to estimate key structural parameters:
+From this dataset, three key parameters are estimated:
 
-* **Permanent Impact (γ)**
-  Estimated by regressing next-day returns on a trade-sign proxy.
+* **Permanent Impact (γ)** — estimated via regression of next-day returns on a trade-sign proxy.
+* **Temporary Impact (η)** — estimated from intraday slippage (`Close − Open`).
+* **Volatility (σ)** — computed from daily log-returns.
 
-* **Temporary Impact (η)**
-  Estimated by regressing intraday slippage (`Close − Open`) on the same proxy.
-
-* **Volatility (σ)**
-  Computed from daily log-returns to model stochastic price evolution.
-
-These estimates parameterize the simulated execution model.
+These parameters define the dynamics of the simulated execution market.
 
 ---
 
-## Repository Structure (Current)
+## Project Structure
 
-| File         | Description                                                                           |
-| ------------ | ------------------------------------------------------------------------------------- |
-| `Project.py` | Data download, parameter estimation, environment definition, and benchmark strategies |
-| `DQN.py`     | Deep Q-Network implementation with Prioritized Experience Replay                      |
-| `figures/`   | Saved plots used in documentation and analysis                                        |
+| File         | Description                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------- |
+| `Project.py` | Data download, parameter estimation, environment construction, and benchmark execution strategies |
+| `DQN.py`     | Deep Q-Network agent with Prioritized Experience Replay and hyperparameter search                 |
+| `figures/`   | Plots used for documentation (e.g., MSFT price visualization)                                     |
 
 ---
 
-## Execution Environment
+## Execution Model
 
-A discrete-time execution simulator inspired by Almgren–Chriss dynamics is implemented.
+A discrete-time execution environment inspired by the Almgren–Chriss framework is implemented.
 
-### State Representation
+### State
 
-Each timestep is defined by:
+Each timestep is described by:
 
 * `S` — Current mid-price
 * `q` — Remaining inventory
-* `t` — Time index within the execution horizon
+* `t` — Time index
 
 ### Action Space
 
-The agent selects one of **11 discrete trading intensities**:
+The agent selects one of **11 discrete execution intensities**:
 
 ```
 {0%, 10%, 20%, ..., 100% of remaining inventory}
 ```
 
-Each action is mapped to a trading rate `v_t`.
-
-### Price Dynamics
-
-* **Execution Price** incorporates temporary impact:
-
-  ```
-  S_exec = S_t − η · v_t
-  ```
-
-* **Mid-Price Evolution** includes volatility and permanent impact:
-
-  ```
-  S_{t+1} = S_t + σ√Δt · ε − γ · v_t Δt
-  ```
-
-  where `ε ~ N(0,1)` represents market noise.
+Each action determines the trading rate `v_t`.
 
 ---
 
-## Reward Design
+## Market Dynamics
 
-The reward function promotes efficient execution while discouraging excessive market impact:
+### Execution Price (Temporary Impact)
 
-* Positive contribution from execution revenue (scaled to return space).
-* Quadratic penalty on trading intensity to avoid overly aggressive liquidation.
+```
+S_exec = S_t − η · v_t
+```
+
+### Mid-Price Evolution (Permanent Impact + Noise)
+
+```
+S_{t+1} = S_t + σ√Δt · ε − γ · v_t Δt
+```
+
+where `ε ~ N(0,1)` models stochastic market movement.
+
+---
+
+## Reward Function
+
+The reward balances execution quality and market impact:
+
+* Positive reward from executed revenue (scaled by initial price).
+* Quadratic penalty on trading intensity to discourage excessive impact.
 * Terminal penalty if inventory remains unexecuted.
 
-This structure reflects the trade-off between:
-
-> Execution speed, price quality, and risk exposure.
+This structure encourages **efficient yet gradual liquidation** rather than immediate dumping.
 
 ---
 
-## Benchmarks Implemented
+## Benchmark Strategies
 
-Performance is evaluated against standard execution strategies:
+Three classical strategies are implemented for comparison:
 
-| Strategy                       | Description                                                |
-| ------------------------------ | ---------------------------------------------------------- |
-| **TWAP**                       | Linear liquidation over time                               |
-| **VWAP (Proxy)**               | U-shaped synthetic volume curve (high open/close activity) |
-| **Almgren–Chriss Closed Form** | Analytical optimal trajectory given risk aversion          |
+| Strategy           | Description                                        |
+| ------------------ | -------------------------------------------------- |
+| **TWAP**           | Linear liquidation across time                     |
+| **VWAP (Proxy)**   | Uses a synthetic U-shaped volume curve             |
+| **Almgren–Chriss** | Closed-form optimal trajectory given risk aversion |
 
 ---
 
 ## Deep Reinforcement Learning Approach
 
-The execution policy is learned using a **Deep Q-Network (DQN)** featuring:
+The execution policy is learned using a **Deep Q-Network**:
 
-* Two hidden layers with ReLU activations
-* Discrete execution action space
-* **Prioritized Experience Replay (PER)** for improved sample efficiency
-* Target network stabilization
-* ε-greedy exploration with decay
-* Hyperparameter grid search across replay prioritization and exploration schedules
-
-The trained model learns a mapping from market state to execution aggressiveness.
+* Input: `[Price, Inventory, Time]`
+* Two fully connected hidden layers with ReLU activations
+* Output: Q-values for 11 discrete trading actions
+* Target network for stabilization
+* ε-greedy exploration
+* **Prioritized Experience Replay (PER)** for efficient sampling
 
 ---
 
-## Academic Context
+## Training Procedure
 
-This work is motivated by the optimal execution literature, particularly:
+Training proceeds episodically:
 
-> Almgren, R., & Chriss, N. (2000).
-> *Optimal Execution of Portfolio Transactions.*
+1. Reset environment with calibrated parameters.
+2. Select execution action using ε-greedy exploration.
+3. Store transitions in prioritized replay buffer.
+4. Update network via TD-learning with importance sampling correction.
+5. Periodically synchronize the target network.
+6. Evaluate learned policy using Transaction Cost Analysis metrics.
+
+A grid search explores replay prioritization, exploration decay, and batch size.
+
+---
+
+## Evaluation Metrics
+
+Execution quality is measured using **Implementation Shortfall**:
+
+* Slippage in USD
+* Slippage in basis points
+* Average realized execution price
+
+These metrics compare achieved execution value against an ideal instantaneous liquidation benchmark.
+
+---
+
+## Installation
+
+Install required dependencies:
+
+```bash
+pip install numpy pandas matplotlib yfinance statsmodels torch
+```
+
+---
+
+## Usage
+
+### Run Environment Calibration and Benchmarks
+
+```bash
+python Project.py
+```
+
+This step:
+
+* Downloads MSFT data
+* Estimates γ, η, σ
+* Runs TWAP, VWAP, and Almgren–Chriss comparisons
+
+### Train and Evaluate the DQN Agent
+
+```bash
+python DQN.py
+```
+
+This step:
+
+* Trains the RL agent
+* Performs hyperparameter search
+* Evaluates execution performance
+* Produces comparison plots versus benchmark strategies
+
+---
+
+## Notes and Simplifications
+
+* Trade direction is inferred from OHLC data rather than true order flow.
+* VWAP uses a synthetic volume profile due to daily data resolution.
+* Action space is discretized; continuous-control methods are not yet explored.
+* Code is intentionally compact prior to modular refactoring.
+
+---
+
+## References
+
+Almgren, R., & Chriss, N. (2000).
+**Optimal Execution of Portfolio Transactions.**
