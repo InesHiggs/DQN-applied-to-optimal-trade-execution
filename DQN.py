@@ -223,9 +223,9 @@ if __name__ == "__main__":
                    eta=scaled_eta, sigma_daily=sigma_daily, seed=42)
     
     lr = 0.001
-    alphas = [0.8, 0.7, 0.6, 0.4, 0.3]                # 0.6=Aggressive PER, 0.2=More random
-    decays = [0.999, 0.998, 0.995, 0.99, 0.98, 0.975]            # Exploration speed
-    batch_sizes = [32, 64, 128]
+    alphas = [0.8, 0.7, 0.6]                # 0.6=Aggressive PER, 0.2=More random + , 0.4, 0.3
+    decays = [0.99, 0.98, 0.975]            # Exploration speed + 0.999, 0.998, 0.995, 
+    batch_sizes = [32, 64]  #, 128
 
     all_results = []
 
